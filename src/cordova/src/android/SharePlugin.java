@@ -1,9 +1,11 @@
 package com.ludei.share.cordova;
 
-import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ResolveInfo;
 import android.net.Uri;
 import android.util.Base64;
+import android.util.Log;
 
 import org.apache.cordova.*;
 import org.apache.http.util.ByteArrayBuffer;
@@ -14,12 +16,14 @@ import org.json.JSONObject;
 import java.io.*;
 import java.net.URL;
 import java.net.URLConnection;
+import java.net.URLEncoder;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class SharePlugin extends CordovaPlugin {
 
+public class SharePlugin extends CordovaPlugin {
 
     private CallbackContext _pendingCallback;
     private static int SHARE_REQUEST_CODE = 2312531;
@@ -27,34 +31,38 @@ public class SharePlugin extends CordovaPlugin {
     @Override
     public boolean execute(String action, JSONArray args, final CallbackContext callbackContext) throws JSONException {
         if ("share".equals(action)) {
+            try {
+                JSONObject dic = args.getJSONObject(0);
+                final String message = getJSONProperty(dic, "message");
+                final String subject = getJSONProperty(dic, "subject");
+                final String url = getJSONProperty(dic, "url");
+                final String socialMedia = getJSONProperty(dic, "socialMedia");
+                Object image = getJSONProperty(dic, "image");
+                String[] images = null;
 
-
-            JSONObject dic = args.getJSONObject(0);
-            final String message = dic.optString("message");
-            final String subject = dic.optString("subject");
-            final String url = dic.optString("url");
-            Object image = dic.get("image");
-            String[] images = null;
-            if (image != null && image instanceof JSONArray) {
-
-                JSONArray array = (JSONArray) image;
-                images = new String[array.length()];
-                for (int i = 0; i < array.length(); ++i) {
-                    images[i] = array.getString(i);
+                if (image != null && image instanceof JSONArray) {
+                    JSONArray array = (JSONArray) image;
+                    images = new String[array.length()];
+                    for (int i = 0; i < array.length(); ++i) {
+                        images[i] = array.getString(i);
+                    }
+                } else if (image != null) {
+                    images = new String[]{image.toString()};
                 }
-            }
-            else if (image != null) {
-                images = new String[]{image.toString()};
-            }
-            final String[] files = images;
+                final String[] files = images;
 
-            this.cordova.getThreadPool().execute(new Runnable() {
-                @Override
-                public void run() {
-                    SharePlugin.this.sendIntent(callbackContext, message, subject, files, url);
-                }
-            });
-            return true;
+                this.cordova.getThreadPool().execute(new Runnable() {
+                    @Override
+                    public void run() {
+                        SharePlugin.this.sendIntent(callbackContext, message, subject, files, url, socialMedia);
+                    }
+                });
+                return true;
+            }
+            catch(JSONException e) {
+                callbackContext.sendPluginResult(new PluginResult(PluginResult.Status.ERROR, e.getMessage()));
+                return false;
+            }
         }
         else {
             JSONArray array = new JSONArray();
@@ -79,17 +87,23 @@ public class SharePlugin extends CordovaPlugin {
         }
     }
 
+    private String getJSONProperty(JSONObject json, String property) throws JSONException {
+        if (json.has(property)) {
+            return json.getString(property);
+        }
+        return null;
+    }
 
-    private void sendIntent(final CallbackContext callbackContext, final String message, final String subject, final String[] files, final String url) {
+    private void sendIntent(final CallbackContext callbackContext, final String message, final String subject, final String[] files, final String url, final String socialMedia) {
 
-        final boolean hasMultipleAttachments = files.length > 1;
+        final boolean hasMultipleAttachments = files != null && files.length > 1;
         final Intent intent = new Intent(hasMultipleAttachments ? Intent.ACTION_SEND_MULTIPLE : Intent.ACTION_SEND);
         intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_WHEN_TASK_RESET);
-
+        Context context = cordova.getActivity().getApplicationContext();
 
         String msg = message;
 
-        if (files.length > 0) {
+        if (files != null && files.length > 0) {
             ArrayList<Uri> fileUris = new ArrayList<Uri>();
             try {
                 final String dir = getDownloadDir();
@@ -119,24 +133,69 @@ public class SharePlugin extends CordovaPlugin {
             intent.setType("text/plain");
         }
 
+        _pendingCallback = callbackContext;
+
+        this.cordova.setActivityResultCallback(this);
+
         if (notEmpty(subject)) {
             intent.putExtra(Intent.EXTRA_SUBJECT, subject);
         }
-        // add the URL to the message, as there seems to be no separate field
-        if (notEmpty(url)) {
-            if (notEmpty(message)) {
-                msg += " " + url;
-            } else {
-                msg = url;
-            }
-        }
+
         if (notEmpty(message)) {
             intent.putExtra(android.content.Intent.EXTRA_TEXT, msg);
             intent.putExtra("sms_body", msg); // sometimes required when the user picks share via sms
         }
 
-        _pendingCallback = callbackContext;
-        this.cordova.setActivityResultCallback(this);
+        if(socialMedia == null) {
+            // Skip other if statements
+        }
+        else if(socialMedia.equals("facebook")) {
+            if(url != null && url.length() > 0) intent.putExtra(android.content.Intent.EXTRA_TEXT, url);
+            boolean sentFacebookIntent = filterByPackageName(context, intent, socialMedia);
+            //
+            // As fallback, launch sharer.php in a browser
+            if (!sentFacebookIntent) {
+                String sharerUrl = "https://www.facebook.com/sharer/sharer.php?u=" + url;
+                final Intent fallbackIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(sharerUrl));
+
+                cordova.getActivity().runOnUiThread(new Runnable() {
+                    public void run() {
+                        SharePlugin.this.cordova.startActivityForResult(SharePlugin.this, Intent.createChooser(fallbackIntent, null), SHARE_REQUEST_CODE);
+                    }
+                });
+
+                return;
+            }
+        }
+        else if(socialMedia.equals("twitter")) {
+            String tweet = "";
+
+            if(notEmpty(message)) tweet = message;
+            if(notEmpty(url)) tweet += " " + url;
+
+            intent.putExtra(Intent.EXTRA_TEXT, tweet);
+
+            if(notEmpty(subject)) {
+                intent.putExtra(android.content.Intent.EXTRA_SUBJECT, subject);
+            }
+
+            filterByPackageName(context, intent, socialMedia);
+        }
+        else if(socialMedia.equals("pinterest")) {
+            String imageURL = files != null && files.length > 0 ? files[0] : "";
+            pinterestShare(message, "MustangCustomizer", imageURL, url);
+
+            return;
+        }
+        else if(socialMedia.equals("tumblr")) {
+            if(notEmpty(url)) intent.putExtra(android.content.Intent.EXTRA_TEXT, url);
+            if(notEmpty(subject)) {
+                intent.putExtra(android.content.Intent.EXTRA_SUBJECT, subject);
+            }
+
+            filterByPackageName(context, intent, socialMedia);
+        }
+
         cordova.getActivity().runOnUiThread(new Runnable() {
             public void run() {
                 SharePlugin.this.cordova.startActivityForResult(SharePlugin.this, Intent.createChooser(intent, null), SHARE_REQUEST_CODE);
@@ -145,7 +204,16 @@ public class SharePlugin extends CordovaPlugin {
 
     }
 
-
+    private static boolean filterByPackageName(Context context, Intent intent, String prefix) {
+        List<ResolveInfo> matches = context.getPackageManager().queryIntentActivities(intent, 0);
+        for (ResolveInfo info : matches) {
+            if((info.activityInfo.name).contains(prefix)) {
+                intent.setPackage(info.activityInfo.packageName);
+                return true;
+            }
+        }
+        return false;
+    }
 
     //Helper utils taken from https://github.com/EddyVerbruggen/SocialSharing-PhoneGap-Plugin
 
@@ -264,5 +332,32 @@ public class SharePlugin extends CordovaPlugin {
         return name.replaceAll("[:\\\\/*?|<> ]", "_");
     }
 
+    public static String urlEncode(String s) {
+        try {
+            return URLEncoder.encode(s, "UTF-8");
+        }
+        catch (UnsupportedEncodingException e) {
+            Log.wtf("", "UTF-8 should always be supported", e);
+            return "";
+        }
+    }
+
+    private void pinterestShare(final String message, final String boardId, final String mediaUrl, final String shareUrl) {
+        Context context = cordova.getActivity().getApplicationContext();
+
+        String url = String.format(
+                "https://www.pinterest.com/pin/create/button/?url=%s&media=%s&description=%s",
+                urlEncode(shareUrl), urlEncode(mediaUrl), message);
+
+        final Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+
+        filterByPackageName(context, intent, "com.pinterest");
+
+        cordova.getActivity().runOnUiThread(new Runnable() {
+            public void run() {
+                SharePlugin.this.cordova.startActivityForResult(SharePlugin.this, Intent.createChooser(intent, null), SHARE_REQUEST_CODE);
+            }
+        });
+    }
 
 }
