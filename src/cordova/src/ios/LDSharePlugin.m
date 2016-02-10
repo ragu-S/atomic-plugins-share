@@ -1,4 +1,6 @@
 #import "LDSharePlugin.h"
+@import Social;
+@import Accounts;
 
 static NSDictionary * errorToDic(NSError * error)
 {
@@ -12,10 +14,9 @@ static NSDictionary * errorToDic(NSError * error)
 
 - (void)pluginInitialize
 {
-    
 }
 
--(void) share:(NSString *) text image:(UIImage*) image callbackId:(NSString*) callbackId
+-(void) share:(NSString *) text image:(UIImage*) image activityType: (NSString*) socialMedia callbackId:(NSString*) callbackId
 {
     NSMutableArray *items = [NSMutableArray new];
     [items addObject:text];
@@ -23,8 +24,32 @@ static NSDictionary * errorToDic(NSError * error)
         [items addObject:image];
     }
     UIActivityViewController * activityController = [[UIActivityViewController alloc] initWithActivityItems:items applicationActivities:nil];
+    
+    NSMutableArray *exclusions = [NSMutableArray arrayWithObjects:
+                                  UIActivityTypePostToFacebook,
+                                  UIActivityTypePostToTwitter,
+                                  UIActivityTypePostToWeibo,
+                                  UIActivityTypeMessage,
+                                  UIActivityTypeMail,
+                                  UIActivityTypePrint,
+                                  UIActivityTypeCopyToPasteboard,
+                                  UIActivityTypeAssignToContact,
+                                  UIActivityTypeSaveToCameraRoll,
+                                  UIActivityTypeAddToReadingList,
+                                  UIActivityTypePostToFlickr,
+                                  UIActivityTypePostToVimeo,
+                                  UIActivityTypePostToTencentWeibo,
+                                  UIActivityTypeAirDrop, nil, nil];
+
+    NSString* includeSpecificActivity;
+    if([socialMedia  isEqualToString: @"facebook"]) {
+        includeSpecificActivity = UIActivityTypePostToFacebook;
+    }
+    
+    [exclusions removeObject:includeSpecificActivity];
+    
     // Exclude activities that are irrelevant
-    activityController.excludedActivityTypes = @[UIActivityTypePrint,UIActivityTypeCopyToPasteboard,UIActivityTypeAssignToContact];
+    activityController.excludedActivityTypes = exclusions;
     
     if ([activityController respondsToSelector:@selector(completionWithItemsHandler)]) {
         activityController.completionWithItemsHandler = ^(NSString *activityType, BOOL completed, NSArray *returnedItems, NSError *error) {
@@ -45,7 +70,6 @@ static NSDictionary * errorToDic(NSError * error)
         };
     }
     
-    
     [self.viewController presentViewController:activityController animated:YES completion:nil];
     
     //iPad compatibility
@@ -55,7 +79,6 @@ static NSDictionary * errorToDic(NSError * error)
             pop.sourceView = self.viewController.view;
         }
     }
-    
 
 }
 
@@ -84,7 +107,7 @@ static NSDictionary * errorToDic(NSError * error)
         }
     }
     return image;
-}
+} 
 
 -(void) jobInBackground:(CDVInvokedUrlCommand*) command
 {
@@ -92,10 +115,94 @@ static NSDictionary * errorToDic(NSError * error)
     NSString * text = [dic objectForKey:@"message"];
     NSString * imageName = [dic objectForKey:@"image"];
     UIImage * image = [self getImage:imageName];
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [self share:text image:image callbackId:command.callbackId];
-    });
+    NSString * socialMedia = [dic objectForKey:@"socialMedia"];
     
+    if([socialMedia isEqualToString:@"twitter"]) {
+        [self postImage: imageName message: text callbackId:command.callbackId];
+    }
+    else {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self share:text image:image activityType:socialMedia callbackId:command.callbackId];
+        });
+    }
+}
+
+-(void)postImage:(NSString*) imageName message: (NSString*) message callbackId:(NSString*) callbackId {
+    if(imageName == nil) return;
+    NSURL *imageURL = [NSURL URLWithString:imageName];
+    ACAccountStore *account = [[ACAccountStore alloc] init];
+    ACAccountType *accountType = [account accountTypeWithAccountTypeIdentifier:
+                                  ACAccountTypeIdentifierTwitter];
+    
+    [account requestAccessToAccountsWithType:accountType
+                                     options:nil
+                                  completion:^(BOOL granted, NSError *error)
+    {
+        if (granted == YES)
+        {
+            NSArray *arrayOfAccounts = [account
+                                        accountsWithAccountType:accountType];
+            
+            if ([arrayOfAccounts count] > 0)
+            {
+                ACAccount *twitterAccount =
+                [arrayOfAccounts lastObject];
+                
+                NSData *imageData = [NSData dataWithContentsOfURL:imageURL];
+                NSURL *requestURL = [NSURL URLWithString:@"https://upload.twitter.com/1.1/media/upload.json"];
+                
+                SLRequest *postRequest = [SLRequest
+                                          requestForServiceType:SLServiceTypeTwitter
+                                          requestMethod:SLRequestMethodPOST
+                                          URL:requestURL parameters:nil];
+                                          
+                                          postRequest.account = twitterAccount;
+                                          [postRequest addMultipartData:imageData
+                                                               withName:@"media"
+                                                                   type:@"image/gif"
+                                                               filename:@"test.gif"];
+                
+                [postRequest performRequestWithHandler:^(NSData *responseData, NSHTTPURLResponse *urlResponse, NSError *error)
+                 {
+                     if(error != nil) {
+                         NSLog(@"Error thrown");
+                     }
+                     
+                     
+                     NSDictionary *json = [NSJSONSerialization JSONObjectWithData:responseData options:0 error:nil];
+                     NSString *mediaID = [json objectForKey:@"media_id_string"];
+                     
+                     NSURL *requestURL2 = [NSURL URLWithString:@"https://api.twitter.com/1.1/statuses/update.json"];
+                     NSDictionary *message2 = @{@"status": @"Mustang Customizer",
+                                                @"media_ids": mediaID };
+                     
+                     SLRequest *postRequest2 = [SLRequest
+                                                requestForServiceType:SLServiceTypeTwitter
+                                                requestMethod:SLRequestMethodPOST
+                                                URL:requestURL2 parameters:message2];
+                     postRequest2.account = twitterAccount;
+                     
+                     [postRequest2 performRequestWithHandler:^(NSData *responseData,
+                                                               NSHTTPURLResponse *urlResponse, NSError *error) {
+                         
+                         
+                         
+                         NSString* errorResult;
+                         if(error != nil) {
+                             errorResult = @"Error thrown";
+                         }
+                         else {
+                             errorResult = @"";
+                         }
+
+                         CDVPluginResult * result = [CDVPluginResult resultWithStatus:error ? CDVCommandStatus_ERROR : CDVCommandStatus_OK messageAsArray: @[@"TwitterShare", errorResult]];
+                         [self.commandDelegate sendPluginResult:result callbackId:callbackId];
+                         
+                     }];
+                 }];
+            }
+        }
+    }];
 }
 
 -(void) share:(CDVInvokedUrlCommand*) command
