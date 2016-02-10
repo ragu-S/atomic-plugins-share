@@ -16,12 +16,17 @@ static NSDictionary * errorToDic(NSError * error)
 {
 }
 
--(void) share:(NSString *) text image:(UIImage*) image activityType: (NSString*) socialMedia callbackId:(NSString*) callbackId
+-(void) share:(NSString *) text image:(UIImage*) image activityType: (NSString*) socialMedia url:(NSString*) url callbackId:(NSString*) callbackId
 {
     NSMutableArray *items = [NSMutableArray new];
     [items addObject:text];
     if (image) {
         [items addObject:image];
+    }
+    else if (url)
+    {
+        NSURL *formattedUrl = [NSURL URLWithString:[NSString stringWithFormat:@"%@", url]];
+        [items addObject:formattedUrl];
     }
     UIActivityViewController * activityController = [[UIActivityViewController alloc] initWithActivityItems:items applicationActivities:nil];
     
@@ -114,15 +119,17 @@ static NSDictionary * errorToDic(NSError * error)
     NSDictionary * dic = [command argumentAtIndex:0 withDefault:@{} andClass:[NSDictionary class]];
     NSString * text = [dic objectForKey:@"message"];
     NSString * imageName = [dic objectForKey:@"image"];
-    UIImage * image = [self getImage:imageName];
+    NSString * url = [dic objectForKey:@"url"];
+    UIImage * image;
     NSString * socialMedia = [dic objectForKey:@"socialMedia"];
     
     if([socialMedia isEqualToString:@"twitter"]) {
-        [self postImage: imageName message: text callbackId:command.callbackId];
+        [self postImage: url message: text callbackId:command.callbackId];
     }
     else {
+        image = [self getImage:imageName];
         dispatch_async(dispatch_get_main_queue(), ^{
-            [self share:text image:image activityType:socialMedia callbackId:command.callbackId];
+            [self share:text image:image activityType:socialMedia url: url callbackId:command.callbackId];
         });
     }
 }
@@ -211,3 +218,4 @@ static NSDictionary * errorToDic(NSError * error)
 }
 
 @end
+
