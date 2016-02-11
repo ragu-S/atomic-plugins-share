@@ -45,13 +45,15 @@ static NSDictionary * errorToDic(NSError * error)
                                   UIActivityTypePostToVimeo,
                                   UIActivityTypePostToTencentWeibo,
                                   UIActivityTypeAirDrop, nil, nil];
-
-    NSString* includeSpecificActivity;
-    if([socialMedia  isEqualToString: @"facebook"]) {
-        includeSpecificActivity = UIActivityTypePostToFacebook;
-    }
     
-    [exclusions removeObject:includeSpecificActivity];
+    if([socialMedia  isEqualToString: @"facebook"]) {
+        [exclusions removeObject:UIActivityTypePostToFacebook];
+    }
+    else {
+        // Remove main social media from EXCLUSION list
+        [exclusions removeObject:UIActivityTypePostToFacebook];
+        [exclusions removeObject:UIActivityTypePostToTwitter];
+    }
     
     // Exclude activities that are irrelevant
     activityController.excludedActivityTypes = exclusions;
@@ -124,7 +126,8 @@ static NSDictionary * errorToDic(NSError * error)
     NSString * socialMedia = [dic objectForKey:@"socialMedia"];
     
     if([socialMedia isEqualToString:@"twitter"]) {
-        [self postImage: url message: text callbackId:command.callbackId];
+        NSString* messageWithUrl = [NSString stringWithFormat:@"%@ %@", text, url];
+        [self postImage: url message: messageWithUrl callbackId:command.callbackId];
     }
     else {
         image = [self getImage:imageName];
@@ -158,55 +161,62 @@ static NSDictionary * errorToDic(NSError * error)
                 NSData *imageData = [NSData dataWithContentsOfURL:imageURL];
                 NSURL *requestURL = [NSURL URLWithString:@"https://upload.twitter.com/1.1/media/upload.json"];
                 
-                SLRequest *postRequest = [SLRequest
-                                          requestForServiceType:SLServiceTypeTwitter
-                                          requestMethod:SLRequestMethodPOST
-                                          URL:requestURL parameters:nil];
-                                          
-                                          postRequest.account = twitterAccount;
-                                          [postRequest addMultipartData:imageData
-                                                               withName:@"media"
-                                                                   type:@"image/gif"
-                                                               filename:@"test.gif"];
-                
-                [postRequest performRequestWithHandler:^(NSData *responseData, NSHTTPURLResponse *urlResponse, NSError *error)
-                 {
-                     if(error != nil) {
-                         NSLog(@"Error thrown");
-                     }
-                     
-                     
-                     NSDictionary *json = [NSJSONSerialization JSONObjectWithData:responseData options:0 error:nil];
-                     NSString *mediaID = [json objectForKey:@"media_id_string"];
-                     
-                     NSURL *requestURL2 = [NSURL URLWithString:@"https://api.twitter.com/1.1/statuses/update.json"];
-                     NSDictionary *message2 = @{@"status": @"Mustang Customizer",
-                                                @"media_ids": mediaID };
-                     
-                     SLRequest *postRequest2 = [SLRequest
-                                                requestForServiceType:SLServiceTypeTwitter
-                                                requestMethod:SLRequestMethodPOST
-                                                URL:requestURL2 parameters:message2];
-                     postRequest2.account = twitterAccount;
-                     
-                     [postRequest2 performRequestWithHandler:^(NSData *responseData,
-                                                               NSHTTPURLResponse *urlResponse, NSError *error) {
-                         
-                         
-                         
-                         NSString* errorResult;
+                if (imageData == nil) {
+                    CDVPluginResult * result = [CDVPluginResult resultWithStatus: CDVCommandStatus_ERROR messageAsArray:@[@"TwitterShare", [NSString stringWithFormat:@"%@ %@", @"invalid image url: ", imageName]]];
+                    [self.commandDelegate sendPluginResult:result callbackId:callbackId];
+                }
+                else {
+                    SLRequest *postRequest = [SLRequest
+                                              requestForServiceType:SLServiceTypeTwitter
+                                              requestMethod:SLRequestMethodPOST
+                                              URL:requestURL parameters:nil];
+                                              
+                                              postRequest.account = twitterAccount;
+                                              [postRequest addMultipartData:imageData
+                                                                   withName:@"media"
+                                                                       type:@"image/gif"
+                                                                   filename:@"test.gif"];
+                    
+                    [postRequest performRequestWithHandler:^(NSData *responseData, NSHTTPURLResponse *urlResponse, NSError *error)
+                     {
                          if(error != nil) {
-                             errorResult = @"Error thrown";
+                             NSLog(@"Error thrown");
                          }
-                         else {
-                             errorResult = @"";
-                         }
-
-                         CDVPluginResult * result = [CDVPluginResult resultWithStatus:error ? CDVCommandStatus_ERROR : CDVCommandStatus_OK messageAsArray: @[@"TwitterShare", errorResult]];
-                         [self.commandDelegate sendPluginResult:result callbackId:callbackId];
                          
+                         
+                         NSDictionary *json = [NSJSONSerialization JSONObjectWithData:responseData options:0 error:nil];
+                         NSString *mediaID = [json objectForKey:@"media_id_string"];
+                         
+                         NSURL *requestURL2 = [NSURL URLWithString:@"https://api.twitter.com/1.1/statuses/update.json"];
+                         
+                         NSDictionary *message2 = @{@"status": message,
+                                                    @"media_ids": mediaID };
+                         
+                         SLRequest *postRequest2 = [SLRequest
+                                                    requestForServiceType:SLServiceTypeTwitter
+                                                    requestMethod:SLRequestMethodPOST
+                                                    URL:requestURL2 parameters:message2];
+                         postRequest2.account = twitterAccount;
+                         
+                         [postRequest2 performRequestWithHandler:^(NSData *responseData,
+                                                                   NSHTTPURLResponse *urlResponse, NSError *error) {
+                             
+                             
+                             
+                             NSString* errorResult;
+                             if(error != nil) {
+                                 errorResult = @"Error thrown";
+                             }
+                             else {
+                                 errorResult = @"";
+                             }
+
+                             CDVPluginResult * result = [CDVPluginResult resultWithStatus:error ? CDVCommandStatus_ERROR : CDVCommandStatus_OK messageAsArray: @[@"TwitterShare", errorResult]];
+                             [self.commandDelegate sendPluginResult:result callbackId:callbackId];
+                             
+                         }];
                      }];
-                 }];
+                }
             }
         }
     }];
@@ -218,4 +228,3 @@ static NSDictionary * errorToDic(NSError * error)
 }
 
 @end
-
