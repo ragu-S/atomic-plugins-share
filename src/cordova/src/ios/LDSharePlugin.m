@@ -127,7 +127,7 @@ static NSDictionary * errorToDic(NSError * error)
     
     if([socialMedia isEqualToString:@"twitter"]) {
         NSString* messageWithUrl = [NSString stringWithFormat:@"%@ %@", text, url];
-        [self postImage: url message: messageWithUrl callbackId:command.callbackId];
+        [self postImage: imageName message: messageWithUrl callbackId:command.callbackId];
     }
     else {
         image = [self getImage:imageName];
@@ -162,7 +162,7 @@ static NSDictionary * errorToDic(NSError * error)
                 NSURL *requestURL = [NSURL URLWithString:@"https://upload.twitter.com/1.1/media/upload.json"];
                 
                 if (imageData == nil) {
-                    CDVPluginResult * result = [CDVPluginResult resultWithStatus: CDVCommandStatus_ERROR messageAsArray:@[@"TwitterShare", [NSString stringWithFormat:@"%@ %@", @"invalid image url: ", imageName]]];
+                    CDVPluginResult * result = [CDVPluginResult resultWithStatus: CDVCommandStatus_ERROR messageAsArray:@[@"TwitterShare", @"0", [NSString stringWithFormat:@"%@ %@", @"invalid image url: ",imageName]]];
                     [self.commandDelegate sendPluginResult:result callbackId:callbackId];
                 }
                 else {
@@ -211,13 +211,17 @@ static NSDictionary * errorToDic(NSError * error)
                                  errorResult = @"";
                              }
 
-                             CDVPluginResult * result = [CDVPluginResult resultWithStatus:error ? CDVCommandStatus_ERROR : CDVCommandStatus_OK messageAsArray: @[@"TwitterShare", errorResult]];
+                             CDVPluginResult * result = [CDVPluginResult resultWithStatus:error ? CDVCommandStatus_ERROR : CDVCommandStatus_OK messageAsArray: @[@"TwitterShare", @"0", errorResult]];
                              [self.commandDelegate sendPluginResult:result callbackId:callbackId];
                              
                          }];
                      }];
                 }
             }
+        }
+        else {
+            CDVPluginResult * result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsArray: @[@"TwitterShare", @"0", @"You have denied permission to share via twitter"]];
+            [self.commandDelegate sendPluginResult:result callbackId:callbackId];
         }
     }];
 }
@@ -228,3 +232,4 @@ static NSDictionary * errorToDic(NSError * error)
 }
 
 @end
+
